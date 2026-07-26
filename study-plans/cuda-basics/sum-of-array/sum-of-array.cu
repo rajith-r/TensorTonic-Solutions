@@ -2,68 +2,56 @@
 
 __global__ void sum_kernel(const float* input, float* result, int N) {
     // Write code here
-    // __shared__ float* tile[blockDim.x];
-
-    int i = blockDim.x*blockIdx.x+threadIdx.x;
-    while(i<((N+1)/2)){
+    int i = blockIdx.x*blockDim.x+threadIdx.x;
+    int stride = gridDim.x*blockDim.x;
+    int end = (N+1)/2;
+    while(i<end){
         int left = 2*i;
         int right = left+1;
-        float curr_sum = input[left];
+        float sum = input[left];
+
         if(right<N){
-            curr_sum += input[right];
+            sum+=input[right];
         }
-        result[i] = curr_sum;
-        i+=gridDim.x*blockDim.x;
+        result[i] = sum;
+        i+=stride;
     }
-    // if(i<threadIdx.x){
-    //     tile[threadIdx.x]=i
-    // }
-    // __sync_threads();
-
-    // for(int i=threadIdx.x)
-    // results[blockIdx.x*blockDim.x] = tile[0];
-
 }
 
 extern "C" void solve(const float* input, float* result, int N) {
     int threads = 256;
-    int currN = N;
-    int blocks = (currN + threads - 1) / threads;
+    int blocks = (N + threads - 1) / threads;
     cudaMemset(result, 0, sizeof(float));
-    
-    float*  bufA;
+
+    float* bufA;
     cudaMalloc(&bufA,sizeof(float)*N);
-    float*  bufB;
+
+    float* bufB;
     cudaMalloc(&bufB,sizeof(float)*N);
-    sum_kernel<<<blocks, threads>>>(input, bufA, currN);
+
+    sum_kernel<<<blocks, threads>>>(input, bufA, N);
+    float* src;
+    float* dst;
+    int tempN = N;
     
-
-    float* src = bufA;
-    float* dst = bufB;
-    if (N <= 0) {
+    src = bufA;
+    dst = bufB;
+    if(N == 0){ 
         return;
-    }
-
-    if (N == 1) {
-        cudaMemcpy(
-            result,
-            input,
-            sizeof(float),
-            cudaMemcpyDeviceToDevice
-        );
-        return;
-    }
-    while(currN>1){
-        currN=(currN+1)/2;
-        blocks = (currN + threads - 1) / threads;
-        if(currN == 1){
-            sum_kernel<<<blocks, threads>>>(src, result, currN);
-        }else{
-            sum_kernel<<<blocks, threads>>>(src, dst, currN);
-            src = dst;
-            dst = (dst == bufA)?bufB:bufA;
+    }else if(N == 1){
+        cudaMemcpy(result, input, sizeof(float), cudaMemcpyDeviceToDevice);
+    }else{
+        while(tempN>1){
+            tempN = (tempN+1)/2;
+            blocks = (tempN + threads - 1) / threads;
+            if(tempN == 1){
+                sum_kernel<<<blocks, threads>>>(src, result, tempN);
+            }else{
+                sum_kernel<<<blocks, threads>>>(src, dst, tempN);
+                src = dst;
+                (dst ==  bufA)?bufB:bufA;   
+            }
         }
     }
-    
     cudaDeviceSynchronize();
 }
